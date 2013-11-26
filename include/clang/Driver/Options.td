@@ -581,7 +581,7 @@ def fno_omit_frame_pointer : Flag<["-"], "fno-omit-frame-pointer">, Group<f_Grou
 def fno_operator_names : Flag<["-"], "fno-operator-names">, Group<f_Group>,
   HelpText<"Do not treat C++ operator name keywords as synonyms for operators">,
   Flags<[CC1Option]>;
-def fno_pascal_strings : Flag<["-"], "fno-pascal-strings">, Group<f_Group>;
+def fno_pascal_strings : Flag<["-"], "fno-pascal-strings">, Group<f_Group>, Flags<[NoForward]>;
 def fno_rtti : Flag<["-"], "fno-rtti">, Group<f_Group>, Flags<[CC1Option]>,
   HelpText<"Disable generation of rtti information">;
 def fno_short_enums : Flag<["-"], "fno-short-enums">, Group<f_Group>;
@@ -608,42 +608,42 @@ def fno_verbose_asm : Flag<["-"], "fno-verbose-asm">, Group<f_Group>;
 def fno_working_directory : Flag<["-"], "fno-working-directory">, Group<f_Group>;
 def fno_wrapv : Flag<["-"], "fno-wrapv">, Group<f_Group>;
 def fno_zero_initialized_in_bss : Flag<["-"], "fno-zero-initialized-in-bss">, Group<f_Group>;
-def fobjc_arc : Flag<["-"], "fobjc-arc">, Group<f_Group>, Flags<[CC1Option]>,
+def fobjc_arc : Flag<["-"], "fobjc-arc">, Group<f_Group>, Flags<[NoForward, CC1Option]>,
   HelpText<"Synthesize retain and release calls for Objective-C pointers">;
 def fno_objc_arc : Flag<["-"], "fno-objc-arc">, Group<f_Group>;
-def fobjc_arc_exceptions : Flag<["-"], "fobjc-arc-exceptions">, Group<f_Group>, Flags<[CC1Option]>,
+def fobjc_arc_exceptions : Flag<["-"], "fobjc-arc-exceptions">, Group<f_Group>, Flags<[NoForward, CC1Option]>,
   HelpText<"Use EH-safe code when synthesizing retains and releases in -fobjc-arc">;
 def fno_objc_arc_exceptions : Flag<["-"], "fno-objc-arc-exceptions">, Group<f_Group>;
-def fobjc_atdefs : Flag<["-"], "fobjc-atdefs">, Group<clang_ignored_f_Group>;
-def fobjc_call_cxx_cdtors : Flag<["-"], "fobjc-call-cxx-cdtors">, Group<clang_ignored_f_Group>;
+def fobjc_atdefs : Flag<["-"], "fobjc-atdefs">, Group<clang_ignored_f_Group>, Flags<[NoForward]>;
+def fobjc_call_cxx_cdtors : Flag<["-"], "fobjc-call-cxx-cdtors">, Group<clang_ignored_f_Group>, Flags<[NoForward]>;
 def fobjc_exceptions: Flag<["-"], "fobjc-exceptions">, Group<f_Group>,
-  HelpText<"Enable Objective-C exceptions">, Flags<[CC1Option]>;
+  HelpText<"Enable Objective-C exceptions">, Flags<[NoForward, CC1Option]>;
 
-def fobjc_gc_only : Flag<["-"], "fobjc-gc-only">, Group<f_Group>, Flags<[CC1Option]>,
+def fobjc_gc_only : Flag<["-"], "fobjc-gc-only">, Group<f_Group>, Flags<[NoForward, CC1Option]>,
   HelpText<"Use GC exclusively for Objective-C related memory management">;
-def fobjc_gc : Flag<["-"], "fobjc-gc">, Group<f_Group>, Flags<[CC1Option]>,
+def fobjc_gc : Flag<["-"], "fobjc-gc">, Group<f_Group>, Flags<[NoForward, CC1Option]>,
   HelpText<"Enable Objective-C garbage collection">;
 def fobjc_legacy_dispatch : Flag<["-"], "fobjc-legacy-dispatch">, Group<f_Group>, Flags<[NoForward]>;
-def fobjc_new_property : Flag<["-"], "fobjc-new-property">, Group<clang_ignored_f_Group>;
+def fobjc_new_property : Flag<["-"], "fobjc-new-property">, Group<clang_ignored_f_Group>, Flags<[NoForward]>;
 def fobjc_infer_related_result_type : Flag<["-"], "fobjc-infer-related-result-type">, 
-                                      Group<f_Group>;
+                                      Group<f_Group>, Flags<[NoForward]>;
 def fno_objc_infer_related_result_type : Flag<["-"],
   "fno-objc-infer-related-result-type">, Group<f_Group>,
   HelpText<
     "do not infer Objective-C related result type based on method family">,
   Flags<[CC1Option]>;
-def fobjc_link_runtime: Flag<["-"], "fobjc-link-runtime">, Group<f_Group>;
+def fobjc_link_runtime: Flag<["-"], "fobjc-link-runtime">, Group<f_Group>, Flags<[NoForward]>;
 
 // Objective-C ABI options.
-def fobjc_runtime_EQ : Joined<["-"], "fobjc-runtime=">, Group<f_Group>, Flags<[CC1Option]>,
+def fobjc_runtime_EQ : Joined<["-"], "fobjc-runtime=">, Group<f_Group>, Flags<[NoForward, CC1Option]>,
   HelpText<"Specify the target Objective-C runtime kind and version">;
-def fobjc_abi_version_EQ : Joined<["-"], "fobjc-abi-version=">, Group<f_Group>;
-def fobjc_nonfragile_abi_version_EQ : Joined<["-"], "fobjc-nonfragile-abi-version=">, Group<f_Group>;
+def fobjc_abi_version_EQ : Joined<["-"], "fobjc-abi-version=">, Group<f_Group>, Flags<[NoForward]>;
+def fobjc_nonfragile_abi_version_EQ : Joined<["-"], "fobjc-nonfragile-abi-version=">, Group<f_Group>, Flags<[NoForward]>;
 def fobjc_nonfragile_abi : Flag<["-"], "fobjc-nonfragile-abi">, Group<f_Group>, Flags<[NoForward]>;
 def fno_objc_nonfragile_abi : Flag<["-"], "fno-objc-nonfragile-abi">, Group<f_Group>;
 
-def fobjc_sender_dependent_dispatch : Flag<["-"], "fobjc-sender-dependent-dispatch">, Group<f_Group>;
-def fobjc : Flag<["-"], "fobjc">, Group<f_Group>;
+def fobjc_sender_dependent_dispatch : Flag<["-"], "fobjc-sender-dependent-dispatch">, Group<f_Group>, Flags<[NoForward]>;
+def fobjc : Flag<["-"], "fobjc">, Group<f_Group>, Flags<[NoForward]>;
 def fomit_frame_pointer : Flag<["-"], "fomit-frame-pointer">, Group<f_Group>;
 def fopenmp : Flag<["-"], "fopenmp">, Group<f_Group>, Flags<[CC1Option]>;
 def fno_optimize_sibling_calls : Flag<["-"], "fno-optimize-sibling-calls">, Group<f_Group>;
@@ -656,7 +656,7 @@ def fpack_struct : Flag<["-"], "fpack-struct">, Group<f_Group>;
 def fno_pack_struct : Flag<["-"], "fno-pack-struct">, Group<f_Group>;
 def fpack_struct_EQ : Joined<["-"], "fpack-struct=">, Group<f_Group>, Flags<[CC1Option]>,
   HelpText<"Specify the default maximum struct packing alignment">;
-def fpascal_strings : Flag<["-"], "fpascal-strings">, Group<f_Group>, Flags<[CC1Option]>,
+def fpascal_strings : Flag<["-"], "fpascal-strings">, Group<f_Group>, Flags<[NoForward, CC1Option]>,
   HelpText<"Recognize and construct Pascal-style string literals">;
 def fpch_preprocess : Flag<["-"], "fpch-preprocess">, Group<f_Group>;
 def fpic : Flag<["-"], "fpic">, Group<f_Group>;

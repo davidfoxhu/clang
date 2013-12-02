@@ -797,7 +797,15 @@ void AggExprEmitter::VisitCallExpr(const CallExpr *E) {
 
 void AggExprEmitter::VisitObjCMessageExpr(ObjCMessageExpr *E) {
   RValue RV = CGF.EmitObjCMessageExpr(E, getReturnValueSlot());
-  EmitMoveFromReturnSlot(E, RV);
+  // S3E David work around for JCE-162
+  // In Objective C (GNU Runtime) we don't ever want to optimise the return into Dest due to the inline nil receiver check
+  // the continue block of which must always be compiled in. This works for non-single line expressions currently as there
+  // uncertainty about pointer aliasing, this however is a side effect. This fix explicitly fixes this by never optimising
+  // the return into Dest.
+  //EmitMoveFromReturnSlot(E, RV); // original code path
+  assert(Dest.getAddr() != RV.getAggregateAddr());
+  std::pair<CharUnits, CharUnits> typeInfo = CGF.getContext().getTypeInfoInChars(E->getType());
+  EmitFinalDestCopy(E->getType(), RV, typeInfo.second);
 }
 
 void AggExprEmitter::VisitBinComma(const BinaryOperator *E) {

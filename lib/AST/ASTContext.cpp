@@ -5344,7 +5344,9 @@ void ASTContext::getObjCEncodingForTypeImpl(QualType T, std::string& S,
             
         case Type::ObjCObjectPointer: {
             const ObjCObjectPointerType *OPT = T->castAs<ObjCObjectPointerType>();
-            if (!OPT->isObjCIdType()) {
+            //if ((!OPT->isObjCIdType()) && (!OPT->isObjCClassType()))
+            if (OPT->getInterfaceDecl())
+            {
                 if (EncodeClassNames) {
                     S += '@';
                     S += '"';

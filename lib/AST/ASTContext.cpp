@@ -4970,7 +4970,7 @@ void ASTContext::getObjCEncodingForType(QualType T, std::string& S,
   // these rules are sufficient to prevent recursive encoding of the
   // same type.
   getObjCEncodingForTypeImpl(T, S, true, true, Field,
-                             true /* outermost type */);
+                             true /* outermost type */, false, false, false, true /* EncodeClassNames */, false);
 }
 
 static char getObjCEncodingForPrimitiveKind(const ASTContext *C,
@@ -5087,356 +5087,371 @@ void ASTContext::getObjCEncodingForTypeImpl(QualType T, std::string& S,
                                             bool EncodeBlockParameters,
                                             bool EncodeClassNames,
                                             bool EncodePointerToObjCTypedef) const {
-  CanQualType CT = getCanonicalType(T);
-  switch (CT->getTypeClass()) {
-  case Type::Builtin:
-  case Type::Enum:
-    if (FD && FD->isBitField())
-      return EncodeBitField(this, S, T, FD);
-    if (const BuiltinType *BT = dyn_cast<BuiltinType>(CT))
-      S += getObjCEncodingForPrimitiveKind(this, BT->getKind());
-    else
-      S += ObjCEncodingForEnumType(this, cast<EnumType>(CT));
-    return;
-
-  case Type::Complex: {
-    const ComplexType *CT = T->castAs<ComplexType>();
-    S += 'j';
-    getObjCEncodingForTypeImpl(CT->getElementType(), S, false, false, 0, false,
-                               false);
-    return;
-  }
-
-  case Type::Atomic: {
-    const AtomicType *AT = T->castAs<AtomicType>();
-    S += 'A';
-    getObjCEncodingForTypeImpl(AT->getValueType(), S, false, false, 0,
-                               false, false);
-    return;
-  }
-
-  // encoding for pointer or reference types.
-  case Type::Pointer:
-  case Type::LValueReference:
-  case Type::RValueReference: {
-    QualType PointeeTy;
-    if (isa<PointerType>(CT)) {
-      const PointerType *PT = T->castAs<PointerType>();
-      if (PT->isObjCSelType()) {
-        S += ':';
-        return;
-      }
-      PointeeTy = PT->getPointeeType();
-    } else {
-      PointeeTy = T->castAs<ReferenceType>()->getPointeeType();
-    }
-
-    bool isReadOnly = false;
-    // For historical/compatibility reasons, the read-only qualifier of the
-    // pointee gets emitted _before_ the '^'.  The read-only qualifier of
-    // the pointer itself gets ignored, _unless_ we are looking at a typedef!
-    // Also, do not emit the 'r' for anything but the outermost type!
-    if (isa<TypedefType>(T.getTypePtr())) {
-      if (OutermostType && T.isConstQualified()) {
-        isReadOnly = true;
-        S += 'r';
-      }
-    } else if (OutermostType) {
-      QualType P = PointeeTy;
-      while (P->getAs<PointerType>())
-        P = P->getAs<PointerType>()->getPointeeType();
-      if (P.isConstQualified()) {
-        isReadOnly = true;
-        S += 'r';
-      }
-    }
-    if (isReadOnly) {
-      // Another legacy compatibility encoding. Some ObjC qualifier and type
-      // combinations need to be rearranged.
-      // Rewrite "in const" from "nr" to "rn"
-      if (StringRef(S).endswith("nr"))
-        S.replace(S.end()-2, S.end(), "rn");
-    }
-
-    if (PointeeTy->isCharType()) {
-      // char pointer types should be encoded as '*' unless it is a
-      // type that has been typedef'd to 'BOOL'.
-      if (!isTypeTypedefedAsBOOL(PointeeTy)) {
-        S += '*';
-        return;
-      }
-    } else if (const RecordType *RTy = PointeeTy->getAs<RecordType>()) {
-      // GCC binary compat: Need to convert "struct objc_class *" to "#".
-      if (RTy->getDecl()->getIdentifier() == &Idents.get("objc_class")) {
-        S += '#';
-        return;
-      }
-      // GCC binary compat: Need to convert "struct objc_object *" to "@".
-      if (RTy->getDecl()->getIdentifier() == &Idents.get("objc_object")) {
-        S += '@';
-        return;
-      }
-      // fall through...
-    }
-    S += '^';
-    getLegacyIntegralTypeEncoding(PointeeTy);
-
-    getObjCEncodingForTypeImpl(PointeeTy, S, false, ExpandPointedToStructures,
-                               NULL);
-    return;
-  }
-
-  case Type::ConstantArray:
-  case Type::IncompleteArray:
-  case Type::VariableArray: {
-    const ArrayType *AT = cast<ArrayType>(CT);
-
-    if (isa<IncompleteArrayType>(AT) && !StructField) {
-      // Incomplete arrays are encoded as a pointer to the array element.
-      S += '^';
-
-      getObjCEncodingForTypeImpl(AT->getElementType(), S,
-                                 false, ExpandStructures, FD);
-    } else {
-      S += '[';
-
-      if (const ConstantArrayType *CAT = dyn_cast<ConstantArrayType>(AT)) {
-        if (getTypeSize(CAT->getElementType()) == 0)
-          S += '0';
-        else
-          S += llvm::utostr(CAT->getSize().getZExtValue());
-      } else {
-        //Variable length arrays are encoded as a regular array with 0 elements.
-        assert((isa<VariableArrayType>(AT) || isa<IncompleteArrayType>(AT)) &&
-               "Unknown array type!");
-        S += '0';
-      }
-
-      getObjCEncodingForTypeImpl(AT->getElementType(), S,
-                                 false, ExpandStructures, FD);
-      S += ']';
-    }
-    return;
-  }
-
-  case Type::FunctionNoProto:
-  case Type::FunctionProto:
-    S += '?';
-    return;
-
-  case Type::Record: {
-    RecordDecl *RDecl = cast<RecordType>(CT)->getDecl();
-    S += RDecl->isUnion() ? '(' : '{';
-    // Anonymous structures print as '?'
-    if (const IdentifierInfo *II = RDecl->getIdentifier()) {
-      S += II->getName();
-      if (ClassTemplateSpecializationDecl *Spec
-          = dyn_cast<ClassTemplateSpecializationDecl>(RDecl)) {
-        const TemplateArgumentList &TemplateArgs = Spec->getTemplateArgs();
-        llvm::raw_string_ostream OS(S);
-        TemplateSpecializationType::PrintTemplateArgumentList(OS,
-                                            TemplateArgs.data(),
-                                            TemplateArgs.size(),
-                                            (*this).getPrintingPolicy());
-      }
-    } else {
-      S += '?';
-    }
-    if (ExpandStructures) {
-      S += '=';
-      if (!RDecl->isUnion()) {
-        getObjCEncodingForStructureImpl(RDecl, S, FD);
-      } else {
-        for (RecordDecl::field_iterator Field = RDecl->field_begin(),
-                                     FieldEnd = RDecl->field_end();
-             Field != FieldEnd; ++Field) {
-          if (FD) {
-            S += '"';
-            S += Field->getNameAsString();
-            S += '"';
-          }
-
-          // Special case bit-fields.
-          if (Field->isBitField()) {
-            getObjCEncodingForTypeImpl(Field->getType(), S, false, true,
-                                       *Field);
-          } else {
-            QualType qt = Field->getType();
-            getLegacyIntegralTypeEncoding(qt);
-            getObjCEncodingForTypeImpl(qt, S, false, true,
-                                       FD, /*OutermostType*/false,
-                                       /*EncodingProperty*/false,
-                                       /*StructField*/true);
-          }
+    CanQualType CT = getCanonicalType(T);
+    switch (CT->getTypeClass()) {
+        case Type::Builtin:
+        case Type::Enum:
+            if (FD && FD->isBitField())
+                return EncodeBitField(this, S, T, FD);
+            if (const BuiltinType *BT = dyn_cast<BuiltinType>(CT))
+                S += getObjCEncodingForPrimitiveKind(this, BT->getKind());
+            else
+                S += ObjCEncodingForEnumType(this, cast<EnumType>(CT));
+            return;
+            
+        case Type::Complex: {
+            const ComplexType *CT = T->castAs<ComplexType>();
+            S += 'j';
+            getObjCEncodingForTypeImpl(CT->getElementType(), S, false, false, 0, false,
+                                       false);
+            return;
         }
-      }
-    }
-    S += RDecl->isUnion() ? ')' : '}';
-    return;
-  }
-
-  case Type::BlockPointer: {
-    const BlockPointerType *BT = T->castAs<BlockPointerType>();
-    S += "@?"; // Unlike a pointer-to-function, which is "^?".
-    if (EncodeBlockParameters) {
-      const FunctionType *FT = BT->getPointeeType()->castAs<FunctionType>();
-      
-      S += '<';
-      // Block return type
-      getObjCEncodingForTypeImpl(FT->getResultType(), S, 
-                                 ExpandPointedToStructures, ExpandStructures, 
-                                 FD, 
-                                 false /* OutermostType */, 
-                                 EncodingProperty, 
-                                 false /* StructField */, 
-                                 EncodeBlockParameters, 
-                                 EncodeClassNames);
-      // Block self
-      S += "@?";
-      // Block parameters
-      if (const FunctionProtoType *FPT = dyn_cast<FunctionProtoType>(FT)) {
-        for (FunctionProtoType::arg_type_iterator I = FPT->arg_type_begin(),
-               E = FPT->arg_type_end(); I && (I != E); ++I) {
-          getObjCEncodingForTypeImpl(*I, S, 
-                                     ExpandPointedToStructures, 
-                                     ExpandStructures, 
-                                     FD, 
-                                     false /* OutermostType */, 
-                                     EncodingProperty, 
-                                     false /* StructField */, 
-                                     EncodeBlockParameters, 
-                                     EncodeClassNames);
+            
+        case Type::Atomic: {
+            const AtomicType *AT = T->castAs<AtomicType>();
+            S += 'A';
+            getObjCEncodingForTypeImpl(AT->getValueType(), S, false, false, 0,
+                                       false, false);
+            return;
         }
-      }
-      S += '>';
-    }
-    return;
-  }
-
-  case Type::ObjCObject:
-  case Type::ObjCInterface: {
-    // Ignore protocol qualifiers when mangling at this level.
-    T = T->castAs<ObjCObjectType>()->getBaseType();
-
-    // The assumption seems to be that this assert will succeed
-    // because nested levels will have filtered out 'id' and 'Class'.
-    const ObjCInterfaceType *OIT = T->castAs<ObjCInterfaceType>();
-    // @encode(class_name)
-    ObjCInterfaceDecl *OI = OIT->getDecl();
-    S += '{';
-    const IdentifierInfo *II = OI->getIdentifier();
-    S += II->getName();
-    S += '=';
-    SmallVector<const ObjCIvarDecl*, 32> Ivars;
-    DeepCollectObjCIvars(OI, true, Ivars);
-    for (unsigned i = 0, e = Ivars.size(); i != e; ++i) {
-      const FieldDecl *Field = cast<FieldDecl>(Ivars[i]);
-      if (Field->isBitField())
-        getObjCEncodingForTypeImpl(Field->getType(), S, false, true, Field);
-      else
-        getObjCEncodingForTypeImpl(Field->getType(), S, false, true, FD,
-                                   false, false, false, false, false,
-                                   EncodePointerToObjCTypedef);
-    }
-    S += '}';
-    return;
-  }
-
-  case Type::ObjCObjectPointer: {
-    const ObjCObjectPointerType *OPT = T->castAs<ObjCObjectPointerType>();
-    if (OPT->isObjCIdType()) {
-      S += '@';
-      return;
-    }
-
-    if (OPT->isObjCClassType() || OPT->isObjCQualifiedClassType()) {
-      // FIXME: Consider if we need to output qualifiers for 'Class<p>'.
-      // Since this is a binary compatibility issue, need to consult with runtime
-      // folks. Fortunately, this is a *very* obsure construct.
-      S += '#';
-      return;
-    }
-
-    if (OPT->isObjCQualifiedIdType()) {
-      getObjCEncodingForTypeImpl(getObjCIdType(), S,
-                                 ExpandPointedToStructures,
-                                 ExpandStructures, FD);
-      if (FD || EncodingProperty || EncodeClassNames) {
-        // Note that we do extended encoding of protocol qualifer list
-        // Only when doing ivar or property encoding.
-        S += '"';
-        for (ObjCObjectPointerType::qual_iterator I = OPT->qual_begin(),
-             E = OPT->qual_end(); I != E; ++I) {
-          S += '<';
-          S += (*I)->getNameAsString();
-          S += '>';
+            
+            // encoding for pointer or reference types.
+        case Type::Pointer:
+        case Type::LValueReference:
+        case Type::RValueReference: {
+            QualType PointeeTy;
+            if (isa<PointerType>(CT)) {
+                const PointerType *PT = T->castAs<PointerType>();
+                if (PT->isObjCSelType()) {
+                    S += ':';
+                    return;
+                }
+                PointeeTy = PT->getPointeeType();
+            } else {
+                PointeeTy = T->castAs<ReferenceType>()->getPointeeType();
+            }
+            
+            bool isReadOnly = false;
+            // For historical/compatibility reasons, the read-only qualifier of the
+            // pointee gets emitted _before_ the '^'.  The read-only qualifier of
+            // the pointer itself gets ignored, _unless_ we are looking at a typedef!
+            // Also, do not emit the 'r' for anything but the outermost type!
+            if (isa<TypedefType>(T.getTypePtr())) {
+                if (OutermostType && T.isConstQualified()) {
+                    isReadOnly = true;
+                    S += 'r';
+                }
+            } else if (OutermostType) {
+                QualType P = PointeeTy;
+                while (P->getAs<PointerType>())
+                    P = P->getAs<PointerType>()->getPointeeType();
+                if (P.isConstQualified()) {
+                    isReadOnly = true;
+                    S += 'r';
+                }
+            }
+            if (isReadOnly) {
+                // Another legacy compatibility encoding. Some ObjC qualifier and type
+                // combinations need to be rearranged.
+                // Rewrite "in const" from "nr" to "rn"
+                if (StringRef(S).endswith("nr"))
+                    S.replace(S.end()-2, S.end(), "rn");
+            }
+            
+            if (PointeeTy->isCharType()) {
+                // char pointer types should be encoded as '*' unless it is a
+                // type that has been typedef'd to 'BOOL'.
+                if (!isTypeTypedefedAsBOOL(PointeeTy)) {
+                    S += '*';
+                    return;
+                }
+            } else if (const RecordType *RTy = PointeeTy->getAs<RecordType>()) {
+                // GCC binary compat: Need to convert "struct objc_class *" to "#".
+                if (RTy->getDecl()->getIdentifier() == &Idents.get("objc_class")) {
+                    S += '#';
+                    return;
+                }
+                // GCC binary compat: Need to convert "struct objc_object *" to "@".
+                if (RTy->getDecl()->getIdentifier() == &Idents.get("objc_object")) {
+                    S += '@';
+                    return;
+                }
+                // fall through...
+            }
+            S += '^';
+            getLegacyIntegralTypeEncoding(PointeeTy);
+            
+            getObjCEncodingForTypeImpl(PointeeTy, S, false, ExpandPointedToStructures,
+                                       NULL);
+            return;
         }
-        S += '"';
-      }
-      return;
-    }
-
-    QualType PointeeTy = OPT->getPointeeType();
-    if (!EncodingProperty &&
-        isa<TypedefType>(PointeeTy.getTypePtr()) &&
-        !EncodePointerToObjCTypedef) {
-      // Another historical/compatibility reason.
-      // We encode the underlying type which comes out as
-      // {...};
-      S += '^';
-      getObjCEncodingForTypeImpl(PointeeTy, S,
-                                 false, ExpandPointedToStructures,
-                                 NULL,
-                                 false, false, false, false, false,
-                                 /*EncodePointerToObjCTypedef*/true);
-      return;
-    }
-
-    S += '@';
-    if (OPT->getInterfaceDecl() && 
-        (FD || EncodingProperty || EncodeClassNames)) {
-      S += '"';
-      S += OPT->getInterfaceDecl()->getIdentifier()->getName();
-      for (ObjCObjectPointerType::qual_iterator I = OPT->qual_begin(),
-           E = OPT->qual_end(); I != E; ++I) {
-        S += '<';
-        S += (*I)->getNameAsString();
-        S += '>';
-      }
-      S += '"';
-    }
-    return;
-  }
-
-  // gcc just blithely ignores member pointers.
-  // FIXME: we shoul do better than that.  'M' is available.
-  case Type::MemberPointer:
-    return;
-  
-  case Type::Vector:
-  case Type::ExtVector:
-    // This matches gcc's encoding, even though technically it is
-    // insufficient.
-    // FIXME. We should do a better job than gcc.
-    return;
-
-  case Type::Auto:
-    // We could see an undeduced auto type here during error recovery.
-    // Just ignore it.
-    return;
-
+            
+        case Type::ConstantArray:
+        case Type::IncompleteArray:
+        case Type::VariableArray: {
+            const ArrayType *AT = cast<ArrayType>(CT);
+            
+            if (isa<IncompleteArrayType>(AT) && !StructField) {
+                // Incomplete arrays are encoded as a pointer to the array element.
+                S += '^';
+                
+                getObjCEncodingForTypeImpl(AT->getElementType(), S,
+                                           false, ExpandStructures, FD);
+            } else {
+                S += '[';
+                
+                if (const ConstantArrayType *CAT = dyn_cast<ConstantArrayType>(AT)) {
+                    if (getTypeSize(CAT->getElementType()) == 0)
+                        S += '0';
+                    else
+                        S += llvm::utostr(CAT->getSize().getZExtValue());
+                } else {
+                    //Variable length arrays are encoded as a regular array with 0 elements.
+                    assert((isa<VariableArrayType>(AT) || isa<IncompleteArrayType>(AT)) &&
+                           "Unknown array type!");
+                    S += '0';
+                }
+                
+                getObjCEncodingForTypeImpl(AT->getElementType(), S,
+                                           false, ExpandStructures, FD);
+                S += ']';
+            }
+            return;
+        }
+            
+        case Type::FunctionNoProto:
+        case Type::FunctionProto:
+            S += '?';
+            return;
+            
+        case Type::Record: {
+            RecordDecl *RDecl = cast<RecordType>(CT)->getDecl();
+            S += RDecl->isUnion() ? '(' : '{';
+            // Anonymous structures print as '?'
+            if (const IdentifierInfo *II = RDecl->getIdentifier()) {
+                S += II->getName();
+                if (ClassTemplateSpecializationDecl *Spec
+                    = dyn_cast<ClassTemplateSpecializationDecl>(RDecl)) {
+                    const TemplateArgumentList &TemplateArgs = Spec->getTemplateArgs();
+                    llvm::raw_string_ostream OS(S);
+                    TemplateSpecializationType::PrintTemplateArgumentList(OS,
+                                                                          TemplateArgs.data(),
+                                                                          TemplateArgs.size(),
+                                                                          (*this).getPrintingPolicy());
+                }
+            } else {
+                S += '?';
+            }
+            if (ExpandStructures) {
+                S += '=';
+                if (!RDecl->isUnion()) {
+                    getObjCEncodingForStructureImpl(RDecl, S, FD);
+                } else {
+                    for (RecordDecl::field_iterator Field = RDecl->field_begin(),
+                         FieldEnd = RDecl->field_end();
+                         Field != FieldEnd; ++Field) {
+                        if (FD) {
+                            S += '"';
+                            S += Field->getNameAsString();
+                            S += '"';
+                        }
+                        
+                        // Special case bit-fields.
+                        if (Field->isBitField()) {
+                            getObjCEncodingForTypeImpl(Field->getType(), S, false, true,
+                                                       *Field);
+                        } else {
+                            QualType qt = Field->getType();
+                            getLegacyIntegralTypeEncoding(qt);
+                            getObjCEncodingForTypeImpl(qt, S, false, true,
+                                                       FD, /*OutermostType*/false,
+                                                       /*EncodingProperty*/false,
+                                                       /*StructField*/true);
+                        }
+                    }
+                }
+            }
+            S += RDecl->isUnion() ? ')' : '}';
+            return;
+        }
+            
+        case Type::BlockPointer: {
+            const BlockPointerType *BT = T->castAs<BlockPointerType>();
+            S += "@?"; // Unlike a pointer-to-function, which is "^?".
+            if (EncodeBlockParameters) {
+                const FunctionType *FT = BT->getPointeeType()->castAs<FunctionType>();
+                
+                S += '<';
+                // Block return type
+                getObjCEncodingForTypeImpl(FT->getResultType(), S,
+                                           ExpandPointedToStructures, ExpandStructures,
+                                           FD,
+                                           false /* OutermostType */,
+                                           EncodingProperty,
+                                           false /* StructField */,
+                                           EncodeBlockParameters,
+                                           EncodeClassNames);
+                // Block self
+                S += "@?";
+                // Block parameters
+                if (const FunctionProtoType *FPT = dyn_cast<FunctionProtoType>(FT)) {
+                    for (FunctionProtoType::arg_type_iterator I = FPT->arg_type_begin(),
+                         E = FPT->arg_type_end(); I && (I != E); ++I) {
+                        getObjCEncodingForTypeImpl(*I, S,
+                                                   ExpandPointedToStructures,
+                                                   ExpandStructures,
+                                                   FD,
+                                                   false /* OutermostType */,
+                                                   EncodingProperty,
+                                                   false /* StructField */,
+                                                   EncodeBlockParameters,
+                                                   EncodeClassNames);
+                    }
+                }
+                S += '>';
+            }
+            return;
+        }
+            
+        case Type::ObjCObject:
+        case Type::ObjCInterface: {
+            // Ignore protocol qualifiers when mangling at this level.
+            T = T->castAs<ObjCObjectType>()->getBaseType();
+            
+            // The assumption seems to be that this assert will succeed
+            // because nested levels will have filtered out 'id' and 'Class'.
+            const ObjCInterfaceType *OIT = T->castAs<ObjCInterfaceType>();
+            // @encode(class_name)
+            ObjCInterfaceDecl *OI = OIT->getDecl();
+            S += '{';
+            const IdentifierInfo *II = OI->getIdentifier();
+            S += II->getName();
+            S += '=';
+            SmallVector<const ObjCIvarDecl*, 32> Ivars;
+            DeepCollectObjCIvars(OI, true, Ivars);
+            for (unsigned i = 0, e = Ivars.size(); i != e; ++i) {
+                const FieldDecl *Field = cast<FieldDecl>(Ivars[i]);
+                if (Field->isBitField())
+                    getObjCEncodingForTypeImpl(Field->getType(), S, false, true, Field);
+                else
+                    getObjCEncodingForTypeImpl(Field->getType(), S, false, true, FD,
+                                               false, false, false, false, false,
+                                               EncodePointerToObjCTypedef);
+            }
+            S += '}';
+            return;
+        }
+            
+        case Type::ObjCObjectPointer: {
+            const ObjCObjectPointerType *OPT = T->castAs<ObjCObjectPointerType>();
+            if (!OPT->isObjCIdType()) {
+                if (EncodeClassNames) {
+                    S += '@';
+                    S += '"';
+                    S += OPT->getInterfaceDecl()->getIdentifier()->getName();
+                    for (ObjCObjectPointerType::qual_iterator I = OPT->qual_begin(),
+                         E = OPT->qual_end(); I != E; ++I) {
+                        S += '<';
+                        S += (*I)->getNameAsString();
+                        S += '>';
+                    }
+                    S += '"';
+                    return;
+                }
+            }
+            else {
+                S += '@';
+                return;
+            }
+            
+            if (OPT->isObjCClassType() || OPT->isObjCQualifiedClassType()) {
+                // FIXME: Consider if we need to output qualifiers for 'Class<p>'.
+                // Since this is a binary compatibility issue, need to consult with runtime
+                // folks. Fortunately, this is a *very* obsure construct.
+                S += '#';
+                return;
+            }
+            
+            if (OPT->isObjCQualifiedIdType()) {
+                getObjCEncodingForTypeImpl(getObjCIdType(), S,
+                                           ExpandPointedToStructures,
+                                           ExpandStructures, FD);
+                if (FD || EncodingProperty || EncodeClassNames) {
+                    // Note that we do extended encoding of protocol qualifer list
+                    // Only when doing ivar or property encoding.
+                    S += '"';
+                    for (ObjCObjectPointerType::qual_iterator I = OPT->qual_begin(),
+                         E = OPT->qual_end(); I != E; ++I) {
+                        S += '<';
+                        S += (*I)->getNameAsString();
+                        S += '>';
+                    }
+                    S += '"';
+                }
+                return;
+            }
+            
+            QualType PointeeTy = OPT->getPointeeType();
+            if (!EncodingProperty &&
+                isa<TypedefType>(PointeeTy.getTypePtr()) &&
+                !EncodePointerToObjCTypedef) {
+                // Another historical/compatibility reason.
+                // We encode the underlying type which comes out as
+                // {...};
+                S += '^';
+                getObjCEncodingForTypeImpl(PointeeTy, S,
+                                           false, ExpandPointedToStructures,
+                                           NULL,
+                                           false, false, false, false, false,
+                                           /*EncodePointerToObjCTypedef*/true);
+                return;
+            }
+            
+            S += '@';
+            if (OPT->getInterfaceDecl() &&
+                (FD || EncodingProperty || EncodeClassNames)) {
+                S += '"';
+                S += OPT->getInterfaceDecl()->getIdentifier()->getName();
+                for (ObjCObjectPointerType::qual_iterator I = OPT->qual_begin(),
+                     E = OPT->qual_end(); I != E; ++I) {
+                    S += '<';
+                    S += (*I)->getNameAsString();
+                    S += '>';
+                }
+                S += '"';
+            }
+            return;
+        }
+            
+            // gcc just blithely ignores member pointers.
+            // FIXME: we shoul do better than that.  'M' is available.
+        case Type::MemberPointer:
+            return;
+            
+        case Type::Vector:
+        case Type::ExtVector:
+            // This matches gcc's encoding, even though technically it is
+            // insufficient.
+            // FIXME. We should do a better job than gcc.
+            return;
+            
+        case Type::Auto:
+            // We could see an undeduced auto type here during error recovery.
+            // Just ignore it.
+            return;
+            
 #define ABSTRACT_TYPE(KIND, BASE)
 #define TYPE(KIND, BASE)
 #define DEPENDENT_TYPE(KIND, BASE) \
-  case Type::KIND:
+case Type::KIND:
 #define NON_CANONICAL_TYPE(KIND, BASE) \
-  case Type::KIND:
+case Type::KIND:
 #define NON_CANONICAL_UNLESS_DEPENDENT_TYPE(KIND, BASE) \
-  case Type::KIND:
+case Type::KIND:
 #include "clang/AST/TypeNodes.def"
-    llvm_unreachable("@encode for dependent type!");
-  }
-  llvm_unreachable("bad type kind!");
+            llvm_unreachable("@encode for dependent type!");
+    }
+    llvm_unreachable("bad type kind!");
 }
 
 void ASTContext::getObjCEncodingForStructureImpl(RecordDecl *RDecl,

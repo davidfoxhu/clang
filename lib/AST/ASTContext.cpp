@@ -4970,6 +4970,16 @@ void ASTContext::getObjCEncodingForType(QualType T, std::string& S,
   // these rules are sufficient to prevent recursive encoding of the
   // same type.
   getObjCEncodingForTypeImpl(T, S, true, true, Field,
+                             true /* outermost type */);
+}
+
+void ASTContext::getObjCEncodingForIvarType(QualType T, std::string& S,
+                                        const FieldDecl *Field) const {
+  // We follow the behavior of gcc, expanding structures which are
+  // directly pointed to, and expanding embedded structures. Note that
+  // these rules are sufficient to prevent recursive encoding of the
+  // same type.
+  getObjCEncodingForTypeImpl(T, S, true, true, Field,
                              true /* outermost type */, false, false, false, true /* EncodeClassNames */, false);
 }
 
@@ -5344,26 +5354,9 @@ void ASTContext::getObjCEncodingForTypeImpl(QualType T, std::string& S,
             
         case Type::ObjCObjectPointer: {
             const ObjCObjectPointerType *OPT = T->castAs<ObjCObjectPointerType>();
-            //if ((!OPT->isObjCIdType()) && (!OPT->isObjCClassType()))
-            if (OPT->getInterfaceDecl())
-            {
-                if (EncodeClassNames) {
-                    S += '@';
-                    S += '"';
-                    S += OPT->getInterfaceDecl()->getIdentifier()->getName();
-                    for (ObjCObjectPointerType::qual_iterator I = OPT->qual_begin(),
-                         E = OPT->qual_end(); I != E; ++I) {
-                        S += '<';
-                        S += (*I)->getNameAsString();
-                        S += '>';
-                    }
-                    S += '"';
-                    return;
-                }
-            }
-            else {
-                S += '@';
-                return;
+            if (OPT->isObjCIdType()) {
+              S += '@';
+              return;
             }
             
             if (OPT->isObjCClassType() || OPT->isObjCQualifiedClassType()) {

@@ -1302,7 +1302,9 @@ public:
   /// If \p Field is specified then record field names are also encoded.
   void getObjCEncodingForType(QualType T, std::string &S,
                               const FieldDecl *Field=0) const;
-
+  void getObjCEncodingForIvarType(QualType T, std::string& S,
+                                        const FieldDecl *Field=0) const;
+    
   void getLegacyIntegralTypeEncoding(QualType &t) const;
 
   /// \brief Put the string version of the type qualifiers \p QT into \p S.
